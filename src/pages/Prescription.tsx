@@ -1,5 +1,4 @@
-
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -8,7 +7,7 @@ import { Upload, Loader2, AlertCircle, Search, ShoppingCart } from "lucide-react
 import { useToast } from "@/components/ui/use-toast";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { supabase } from "@/integrations/supabase/client";
-import { createWorker } from 'tesseract.js';
+import { createWorker } from "tesseract.js";
 
 const Prescription = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -19,8 +18,8 @@ const Prescription = () => {
     message: string;
   } | null>(null);
   const [matchingProducts, setMatchingProducts] = useState<any[]>([]);
-  const [extractedText, setExtractedText] = useState<string>('');
-  
+  const [extractedText, setExtractedText] = useState<string>("");
+
   const { toast } = useToast();
   const location = useLocation();
   const navigate = useNavigate();
@@ -30,7 +29,10 @@ const Prescription = () => {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
-      if (selectedFile.type === "application/pdf" || selectedFile.type.startsWith("image/")) {
+      if (
+        selectedFile.type === "application/pdf" ||
+        selectedFile.type.startsWith("image/")
+      ) {
         setFile(selectedFile);
         setVerificationResult(null);
         setMatchingProducts([]);
@@ -38,55 +40,50 @@ const Prescription = () => {
         toast({
           variant: "destructive",
           title: "Invalid file type",
-          description: "Please upload a PDF or image file"
+          description: "Please upload a PDF or image file",
         });
       }
     }
   };
 
   const performOCR = async (imageFile: File) => {
-    const worker = await createWorker('eng');
-    
+    const worker = await createWorker("eng");
     try {
-      // Perform OCR on the image
       const result = await worker.recognize(imageFile);
       await worker.terminate();
       return result.data.text.toLowerCase();
     } catch (error) {
-      console.error('OCR Error:', error);
-      throw new Error('Failed to process the image');
+      console.error("OCR Error:", error);
+      throw new Error("Failed to process the image");
     }
   };
 
   const findMatchingProducts = async (text: string) => {
     try {
-      // Get all products
       const { data: products, error } = await supabase
-        .from('products')
-        .select('*');
+        .from("products")
+        .select("*");
 
       if (error) throw error;
 
-      // Filter products based on text match
-      const matches = products?.filter(product => {
-        const productNameLower = product.name.toLowerCase();
-        const matches = text.includes(productNameLower);
-        return matches;
-      }) || [];
+      const matches =
+        products?.filter((product) =>
+          text.includes(product.name.toLowerCase())
+        ) || [];
 
       return matches;
     } catch (error) {
-      console.error('Error finding matching products:', error);
+      console.error("Error finding matching products:", error);
       return [];
     }
   };
 
   const validatePrescription = (text: string) => {
-    const requiredKeywords = ['prescription', 'doctor', 'medication'];
-    const foundKeywords = requiredKeywords.filter(keyword => text.includes(keyword));
+    const requiredKeywords = ["prescription", "doctor", "medication"];
+    const foundKeywords = requiredKeywords.filter((k) => text.includes(k));
     return {
       isValid: foundKeywords.length >= 2,
-      foundKeywords
+      foundKeywords,
     };
   };
 
@@ -96,7 +93,7 @@ const Prescription = () => {
       toast({
         variant: "destructive",
         title: "No file selected",
-        description: "Please select a prescription file to upload"
+        description: "Please select a prescription file to upload",
       });
       return;
     }
@@ -106,9 +103,10 @@ const Prescription = () => {
     setMatchingProducts([]);
 
     try {
-      // Get the current user
-      const { data: { user } } = await supabase.auth.getUser();
-      
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
       if (!user) {
         toast({
           variant: "destructive",
@@ -119,79 +117,67 @@ const Prescription = () => {
         return;
       }
 
-      // Perform OCR
       const text = await performOCR(file);
       setExtractedText(text);
-      
+
       const { isValid, foundKeywords } = validatePrescription(text);
 
-      // Upload to Supabase Storage
-      const fileExt = file.name.split('.').pop();
+      const fileExt = file.name.split(".").pop();
       const fileName = `${user.id}/${Date.now()}.${fileExt}`;
-      
+
       const { error: uploadError, data: uploadData } = await supabase.storage
-        .from('prescriptions')
+        .from("prescriptions")
         .upload(fileName, file);
 
       if (uploadError) throw uploadError;
 
-      // Save prescription record 
-      const { error: dbError } = await supabase
-        .from('prescriptions')
-        .insert({
-          user_id: user.id,
-          file_url: uploadData.path,
-          medicine_name: productName || 'general',
-          status: isValid ? 'verified' : 'rejected'
-        });
+      const { error: dbError } = await supabase.from("prescriptions").insert({
+        user_id: user.id,
+        file_url: uploadData.path,
+        medicine_name: productName || "general",
+        status: isValid ? "verified" : "rejected",
+      });
 
       if (dbError) throw dbError;
 
-      // Find matching products from the extracted text
       const matches = await findMatchingProducts(text);
       setMatchingProducts(matches);
 
       if (isValid) {
-        // If a specific product was selected and the prescription is valid
         if (productId) {
-          // Add to cart - using the new cart_items table
-          try {
-            const { error: cartError } = await supabase
-              .from('cart_items')
-              .insert({
-                user_id: user.id,
-                product_id: productId,
-                quantity: 1,
-              });
+          const { error: cartError } = await supabase
+            .from("cart_items")
+            .insert({
+              user_id: user.id,
+              product_id: productId,
+              quantity: 1,
+            });
 
-            if (cartError) {
-              console.error("Cart error:", cartError);
-              // Don't throw, just log the error
-            } else {
-              toast({
-                title: "Success",
-                description: "Product added to cart",
-              });
-            }
-          } catch (cartError) {
-            console.error("Failed to add to cart:", cartError);
+          if (!cartError) {
+            toast({
+              title: "Success",
+              description: "Product added to cart",
+            });
           }
         }
 
         setVerificationResult({
           success: true,
-          message: matches.length > 0 
-            ? "Prescription verified successfully. We found matching medicines!"
-            : "Prescription verified successfully."
+          message:
+            matches.length > 0
+              ? "Prescription verified successfully. We found matching medicines!"
+              : "Prescription verified successfully.",
         });
       } else {
         setVerificationResult({
           success: false,
-          message: `Invalid prescription. Missing required elements. Found keywords: ${foundKeywords.join(', ')}`
+          message: `Invalid prescription. Missing required elements. Found keywords: ${foundKeywords.join(
+            ", "
+          )}`,
         });
       }
     } catch (error) {
-      console.error('Verification error:', error);
+      console.error("Verification error:", error);
       toast({
         variant: "destructive",
         title: "Error",
@@ -199,7 +185,7 @@ const Prescription = () => {
       });
       setVerificationResult({
         success: false,
-        message: "Failed to process prescription"
+        message: "Failed to process prescription",
       });
     } finally {
       setIsVerifying(false);
@@ -207,20 +193,21 @@ const Prescription = () => {
   };
 
   const handleProductSelect = (product: any) => {
-    navigate('/prescription', { 
-      state: { 
+    navigate("/prescription", {
+      state: {
         productId: product.id,
         productName: product.name,
-        price: product.price
-      } 
+        price: product.price,
+      },
     });
   };
 
   const addToCart = async (product: any) => {
     try {
-      // Get the current user
-      const { data: { user } } = await supabase.auth.getUser();
-      
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
       if (!user) {
         toast({
           variant: "destructive",
@@ -230,17 +217,13 @@ const Prescription = () => {
         return;
       }
 
-      // Add product to cart
-      const { error } = await supabase
-        .from('cart_items')
-        .insert({
-          user_id: user.id,
-          product_id: product.id,
-          quantity: 1
-        });
+      const { error } = await supabase.from("cart_items").insert({
+        user_id: user.id,
+        product_id: product.id,
+        quantity: 1,
+      });
 
       if (error) {
-        console.error("Cart error:", error);
         toast({
           variant: "destructive",
           title: "Error",
@@ -265,66 +248,82 @@ const Prescription = () => {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <Card className="max-w-md mx-auto">
+      <Card className="max-w-xl mx-auto shadow-xl hover:shadow-2xl rounded-2xl transition-shadow">
         <CardHeader>
-          <CardTitle>Verify Prescription</CardTitle>
+          <CardTitle className="text-xl font-bold text-gray-800">
+            Verify Your Prescription
+          </CardTitle>
         </CardHeader>
+
         <CardContent>
           {productName && (
-            <div className="mb-4 p-4 bg-gray-50 rounded-lg">
-              <h3 className="font-medium">Selected Product:</h3>
-              <p>{productName}</p>
-              <p className="text-primary font-medium">${price?.toFixed(2)}</p>
+            <div className="mb-4 p-4 bg-muted/20 border rounded-lg space-y-1">
+              <h3 className="font-semibold text-gray-800">Selected Product</h3>
+              <p className="text-gray-600">{productName}</p>
+              <p className="text-primary font-semibold">${price?.toFixed(2)}</p>
             </div>
           )}
 
           {verificationResult && (
-            <Alert className={`mb-4 ${verificationResult.success ? 'bg-green-50' : 'bg-red-50'}`}>
+            <Alert
+              className={`mb-4 rounded-lg border ${
+                verificationResult.success
+                  ? "bg-green-50 border-green-400 text-green-800"
+                  : "bg-red-50 border-red-400 text-red-800"
+              }`}
+            >
               <AlertCircle className="h-4 w-4" />
-              <AlertTitle>
-                {verificationResult.success ? 'Verification Successful' : 'Verification Failed'}
+              <AlertTitle className="font-semibold">
+                {verificationResult.success
+                  ? "Verification Successful"
+                  : "Verification Failed"}
               </AlertTitle>
-              <AlertDescription>
-                {verificationResult.message}
-              </AlertDescription>
+              <AlertDescription>{verificationResult.message}</AlertDescription>
             </Alert>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid w-full max-w-sm items-center gap-1.5">
-              <label 
-                htmlFor="prescription" 
-                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+            <div className="grid w-full items-start gap-2">
+              <label
+                htmlFor="prescription"
+                className="text-sm font-medium text-gray-700"
               >
-                Upload your prescription (PDF or Image)
+                Upload your prescription
+                <span className="block text-xs text-muted-foreground">
+                  (PDF or image format)
+                </span>
               </label>
               <Input
                 id="prescription"
                 type="file"
                 accept=".pdf,image/*"
                 onChange={handleFileChange}
-                className="cursor-pointer"
+                className="cursor-pointer file:cursor-pointer file:mr-4 file:rounded-md file:border-none file:bg-primary file:text-white file:px-4"
                 disabled={isVerifying}
                 ref={fileInputRef}
               />
+
               {isVerifying && ocrProgress > 0 && (
-                <div className="w-full bg-gray-200 rounded-full h-2.5 mt-2">
-                  <div 
-                    className="bg-blue-600 h-2.5 rounded-full" 
+                <div className="w-full bg-gray-100 rounded-full h-3 mt-2 overflow-hidden">
+                  <div
+                    className="bg-blue-500 h-full transition-all duration-500 ease-in-out"
                     style={{ width: `${ocrProgress}%` }}
-                  ></div>
+                  />
                 </div>
               )}
             </div>
-            <Button 
-              type="submit" 
-              className="w-full"
+
+            <Button
+              type="submit"
+              className="w-full shadow-sm hover:shadow-md transition duration-300"
               disabled={!file || isVerifying}
             >
               {isVerifying ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  {ocrProgress > 0 ? `Processing (${ocrProgress}%)` : 'Verifying...'}
+                  {ocrProgress > 0
+                    ? `Processing (${ocrProgress}%)`
+                    : "Verifying..."}
                 </>
               ) : (
                 <>
@@ -337,30 +336,31 @@ const Prescription = () => {
 
           {matchingProducts.length > 0 && (
             <div className="mt-6">
-              <h3 className="text-md font-medium mb-2">Matching Medicines Found:</h3>
-              <div className="space-y-2">
-                {matchingProducts.map(product => (
-                  <div 
-                    key={product.id} 
-                    className="p-3 border rounded-md flex justify-between items-center hover:bg-gray-50"
+              <h3 className="text-md font-semibold text-gray-800 mb-2">
+                Matching Medicines Found:
+              </h3>
+              <div className="space-y-3">
+                {matchingProducts.map((product) => (
+                  <div
+                    key={product.id}
+                    className="p-4 border rounded-lg bg-white flex justify-between items-center hover:shadow-sm transition"
                   >
                     <div>
-                      <p className="font-medium">{product.name}</p>
-                      <p className="text-sm text-gray-500">${product.price.toFixed(2)}</p>
+                      <p className="font-medium text-gray-900">{product.name}</p>
+                      <p className="text-sm text-gray-500">
+                        ${product.price.toFixed(2)}
+                      </p>
                     </div>
                     <div className="flex space-x-2">
-                      <Button 
-                        size="sm" 
+                      <Button
+                        size="sm"
                         variant="outline"
                         onClick={() => handleProductSelect(product)}
                       >
                         <Search className="h-4 w-4 mr-1" /> View
                       </Button>
-                      <Button 
-                        size="sm"
-                        onClick={() => addToCart(product)}
-                      >
-                        <ShoppingCart className="h-4 w-4 mr-1" /> Add to Cart
+                      <Button size="sm" onClick={() => addToCart(product)}>
+                        <ShoppingCart className="h-4 w-4 mr-1" /> Add
                       </Button>
                     </div>
                   </div>

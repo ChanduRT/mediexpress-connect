@@ -1,6 +1,5 @@
-
-import { Search, ShoppingCart, LogOut, Menu } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Search, ShoppingCart, LogOut, Menu, X, Stethoscope } from "lucide-react";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useEffect, useState } from "react";
@@ -18,7 +17,18 @@ const Navbar = () => {
   const [userRole, setUserRole] = useState<string | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [cartCount, setCartCount] = useState(0);
+  const [isScrolled, setIsScrolled] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 20);
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -105,42 +115,79 @@ const Navbar = () => {
   
   const navLinks = getNavigationLinks();
 
+  const isActiveLink = (path: string) => location.pathname === path;
+
+  const getRoleBadgeColor = (role: string) => {
+    switch (role) {
+      case "doctor":
+        return "bg-blue-500";
+      case "admin":
+        return "bg-purple-500";
+      default:
+        return "bg-green-500";
+    }
+  };
+
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-md border-b border-gray-100">
+    <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
+      isScrolled 
+        ? 'bg-white/95 backdrop-blur-lg shadow-lg border-b border-gray-200' 
+        : 'bg-white/80 backdrop-blur-md border-b border-gray-100'
+    }`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
-          <Link to="/" className="flex items-center space-x-2">
-            <div className="text-primary text-2xl font-semibold">MediExpress</div>
+          {/* Logo */}
+          <Link to="/" className="flex items-center space-x-3 group">
+            <div className="relative">
+              <div className="w-10 h-10 bg-gradient-to-br from-primary to-primary-hover rounded-xl flex items-center justify-center shadow-lg group-hover:shadow-xl transition-all duration-300 group-hover:scale-105">
+                <Stethoscope className="w-5 h-5 text-white" />
+              </div>
+              <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full animate-pulse"></div>
+            </div>
+            <div className="text-2xl font-bold bg-gradient-to-r from-primary to-primary-hover bg-clip-text text-transparent">
+              MediExpress
+            </div>
           </Link>
           
           {/* Desktop navigation */}
-          <div className="hidden md:flex items-center space-x-8">
+          <div className="hidden md:flex items-center space-x-1">
             {navLinks.map(link => (
               <Link 
                 key={link.path}
                 to={link.path} 
-                className="text-gray-700 hover:text-primary transition-colors"
+                className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-300 relative overflow-hidden group ${
+                  isActiveLink(link.path)
+                    ? 'text-primary bg-primary/10 shadow-md'
+                    : 'text-gray-700 hover:text-primary hover:bg-primary/5'
+                }`}
               >
-                {link.text}
+                <span className="relative z-10">{link.text}</span>
+                {isActiveLink(link.path) && (
+                  <div className="absolute inset-0 bg-gradient-to-r from-primary/20 to-primary/10 rounded-full"></div>
+                )}
               </Link>
             ))}
           </div>
 
-          <div className="flex items-center space-x-4">
-            <button className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-              <Search className="w-5 h-5 text-gray-700" />
+          {/* Right side actions */}
+          <div className="flex items-center space-x-2">
+            {/* Search button */}
+            <button className="p-2.5 hover:bg-gray-100 rounded-full transition-all duration-300 hover:scale-105 group">
+              <Search className="w-5 h-5 text-gray-700 group-hover:text-primary transition-colors" />
             </button>
+
+            {/* Cart button */}
             {session && (
               <Button 
                 variant="ghost" 
                 size="icon" 
-                className="relative"
+                className="relative p-2.5 hover:bg-gray-100 rounded-full transition-all duration-300 hover:scale-105 group"
                 onClick={() => navigate('/cart')}
               >
-                <ShoppingCart className="w-5 h-5 text-gray-700" />
+                <ShoppingCart className="w-5 h-5 text-gray-700 group-hover:text-primary transition-colors" />
                 {cartCount > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-primary text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
-                    {cartCount}
+                  <span className="absolute -top-1 -right-1 bg-gradient-to-r from-red-500 to-red-600 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center animate-pulse shadow-lg">
+                    {cartCount > 99 ? '99+' : cartCount}
                   </span>
                 )}
               </Button>
@@ -149,42 +196,58 @@ const Navbar = () => {
             {/* Mobile menu button */}
             <button 
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="p-2 hover:bg-gray-100 rounded-full transition-colors md:hidden"
+              className="p-2.5 hover:bg-gray-100 rounded-full transition-all duration-300 md:hidden hover:scale-105"
             >
-              <Menu className="w-5 h-5 text-gray-700" />
+              {isMobileMenuOpen ? (
+                <X className="w-5 h-5 text-gray-700" />
+              ) : (
+                <Menu className="w-5 h-5 text-gray-700" />
+              )}
             </button>
             
-            {/* Auth buttons */}
+            {/* Auth section */}
             {session ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm" className="flex items-center gap-2">
-                    <span className="hidden sm:inline">{session.user.email}</span>
-                    <div className="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center text-sm">
-                      {session.user.email?.charAt(0).toUpperCase() || 'U'}
+                  <Button variant="ghost" className="flex items-center gap-3 px-3 py-2 rounded-full hover:bg-gray-100 transition-all duration-300 hover:scale-105">
+                    <span className="hidden sm:inline text-sm font-medium text-gray-700">
+                      {session.user.email?.split('@')[0] || 'User'}
+                    </span>
+                    <div className="relative">
+                      <div className={`w-9 h-9 rounded-full ${getRoleBadgeColor(userRole || '')} text-white flex items-center justify-center text-sm font-semibold shadow-lg`}>
+                        {session.user.email?.charAt(0).toUpperCase() || 'U'}
+                      </div>
+                      <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white"></div>
                     </div>
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuLabel>
-                    <span className="capitalize">{userRole || "User"}</span>
+                <DropdownMenuContent align="end" className="w-56 p-2">
+                  <DropdownMenuLabel className="px-3 py-2">
+                    <div className="flex flex-col space-y-1">
+                      <span className="text-sm font-medium text-gray-900">
+                        {session.user.email?.split('@')[0] || 'User'}
+                      </span>
+                      <span className={`text-xs px-2 py-1 rounded-full text-white w-fit ${getRoleBadgeColor(userRole || '')}`}>
+                        {(userRole || "patient").charAt(0).toUpperCase() + (userRole || "patient").slice(1)}
+                      </span>
+                    </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => navigate("/profile")}>
+                  <DropdownMenuItem onClick={() => navigate("/profile")} className="rounded-lg">
                     Profile
                   </DropdownMenuItem>
                   {userRole === "doctor" && (
-                    <DropdownMenuItem onClick={() => navigate("/doctor-dashboard")}>
+                    <DropdownMenuItem onClick={() => navigate("/doctor-dashboard")} className="rounded-lg">
                       Doctor Dashboard
                     </DropdownMenuItem>
                   )}
                   {userRole === "admin" && (
-                    <DropdownMenuItem onClick={() => navigate("/admin-dashboard")}>
+                    <DropdownMenuItem onClick={() => navigate("/admin-dashboard")} className="rounded-lg">
                       Admin Dashboard
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={handleLogout}>
+                  <DropdownMenuItem onClick={handleLogout} className="rounded-lg text-red-600 hover:bg-red-50">
                     <LogOut className="w-4 h-4 mr-2" />
                     Logout
                   </DropdownMenuItem>
@@ -192,8 +255,9 @@ const Navbar = () => {
               </DropdownMenu>
             ) : (
               <Button
-                variant="ghost"
+                variant="default"
                 size="sm"
+                className="bg-gradient-to-r from-primary to-primary-hover text-white px-6 py-2 rounded-full hover:shadow-lg transition-all duration-300 hover:scale-105"
                 onClick={() => navigate("/auth")}
               >
                 Login
@@ -205,13 +269,17 @@ const Navbar = () => {
       
       {/* Mobile navigation menu */}
       {isMobileMenuOpen && (
-        <div className="md:hidden bg-white border-t border-gray-100 py-2">
-          <div className="space-y-1 px-4">
+        <div className="md:hidden bg-white/95 backdrop-blur-lg border-t border-gray-200 shadow-lg">
+          <div className="py-4 px-4 space-y-2">
             {navLinks.map(link => (
               <Link
                 key={link.path}
                 to={link.path}
-                className="block py-2 text-base text-gray-700 hover:text-primary transition-colors"
+                className={`block px-4 py-3 rounded-xl text-base font-medium transition-all duration-300 ${
+                  isActiveLink(link.path)
+                    ? 'text-primary bg-primary/10 shadow-md'
+                    : 'text-gray-700 hover:text-primary hover:bg-primary/5'
+                }`}
                 onClick={() => setIsMobileMenuOpen(false)}
               >
                 {link.text}
