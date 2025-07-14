@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { Edit, Trash2, ShoppingCart, Heart, Star, Package, Shield } from "lucide-react";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Edit, Trash2, ShoppingCart, Star, Package, Shield, AlertCircle } from "lucide-react";
+import { useToast } from "@/components/ui/use-toast";
+import { supabase } from "@/integrations/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
+import ProductForm from "./ProductForm";
 
 interface Product {
   id: string;
@@ -21,202 +28,267 @@ const ProductCard = ({ product, isAdmin }: ProductCardProps) => {
   const [showEditForm, setShowEditForm] = useState(false);
   const [isAddingToCart, setIsAddingToCart] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
-  const [isFavorited, setIsFavorited] = useState(false);
-
-  const showToast = (title: string, description: string, variant: 'default' | 'destructive' = 'default') => {
-    console.log(`Toast: ${title} - ${description} (${variant})`);
-  };
+  const [imageError, setImageError] = useState(false);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const handleDelete = async () => {
-    try {
-      // Mock API call
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      showToast("Success", "Product deleted successfully");
-    } catch (error) {
-      showToast("Error", "Failed to delete product", "destructive");
+    const { error } = await supabase
+      .from('products')
+      .delete()
+      .eq('id', product.id);
+
+    if (error) {
+      toast({
+        title: "Error",
+        description: "Failed to delete product",
+        variant: "destructive",
+      });
+      return;
     }
+
+    toast({
+      title: "Success",
+      description: "Product deleted successfully",
+    });
+    queryClient.invalidateQueries({ queryKey: ['products'] });
   };
 
   const handleAddToCart = async () => {
     try {
       setIsAddingToCart(true);
+      // Check if user is authenticated
+      const { data: { session } } = await supabase.auth.getSession();
       
-      // Mock API call
-      await new Promise(resolve => setTimeout(resolve, 800));
-      
-      if (product.prescription_required) {
-        showToast("Prescription Required", "Redirecting to prescription upload...");
+      if (!session) {
+        navigate("/auth");
         return;
       }
-      
-      showToast("Added to cart", `${product.name} has been added to your cart`);
+
+      if (product.prescription_required) {
+        navigate('/prescription', { 
+          state: { 
+            productId: product.id, 
+            productName: product.name, 
+            price: product.price 
+          } 
+        });
+        return;
+      }
+
+      // Check if product already in cart
+      const { data: existingItem } = await supabase
+        .from('cart_items')
+        .select()
+        .eq('user_id', session.user.id)
+        .eq('product_id', product.id)
+        .single();
+
+      if (existingItem) {
+        // Update quantity if already in cart
+        const { error } = await supabase
+          .from('cart_items')
+          .update({ quantity: existingItem.quantity + 1 })
+          .eq('id', existingItem.id);
+        
+        if (error) throw error;
+      } else {
+        // Add new item to cart
+        const { error } = await supabase
+          .from('cart_items')
+          .insert({
+            user_id: session.user.id,
+            product_id: product.id,
+            quantity: 1
+          });
+        
+        if (error) throw error;
+      }
+
+      toast({
+        title: "Added to cart",
+        description: `${product.name} has been added to your cart`,
+      });
     } catch (error) {
       console.error('Error adding to cart:', error);
-      showToast("Error", "Failed to add item to cart", "destructive");
+      toast({
+        title: "Error",
+        description: "Failed to add item to cart",
+        variant: "destructive",
+      });
     } finally {
       setIsAddingToCart(false);
     }
   };
 
   const getStockStatus = () => {
-    if (product.stock_quantity === 0) return { text: "Out of Stock", color: "text-red-500", bgColor: "bg-red-50" };
-    if (product.stock_quantity < 5) return { text: "Low Stock", color: "text-yellow-600", bgColor: "bg-yellow-50" };
-    return { text: "In Stock", color: "text-green-600", bgColor: "bg-green-50" };
+    if (product.stock_quantity === 0) {
+      return { text: "Out of Stock", color: "text-red-600", bg: "bg-red-100" };
+    } else if (product.stock_quantity <= 5) {
+      return { text: "Low Stock", color: "text-orange-600", bg: "bg-orange-100" };
+    } else {
+      return { text: "In Stock", color: "text-green-600", bg: "bg-green-100" };
+    }
   };
 
   const stockStatus = getStockStatus();
 
   return (
-    <div 
-      className={`group relative bg-white rounded-2xl shadow-sm border transition-all duration-300 hover:shadow-xl hover:border-blue-200 overflow-hidden ${
-        isHovered ? 'transform hover:-translate-y-1' : ''
+    <Card 
+      className={`group overflow-hidden border-0 shadow-lg hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2 bg-white/95 backdrop-blur-sm ${
+        isHovered ? 'ring-2 ring-blue-500' : ''
       }`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      {/* Product Image */}
-      <div className="relative aspect-w-16 aspect-h-9 overflow-hidden">
-        {product.image_url ? (
-          <img
-            src={product.image_url}
-            alt={product.name}
-            className="object-cover w-full h-48 transition-transform duration-500 group-hover:scale-110"
-          />
+      <div className="relative overflow-hidden bg-gradient-to-br from-gray-50 to-gray-100">
+        {product.image_url && !imageError ? (
+          <div className="relative">
+            <img 
+              src={product.image_url} 
+              alt={product.name}
+              className="object-cover w-full h-48 transition-transform duration-300 group-hover:scale-110"
+              onError={() => setImageError(true)}
+            />
+            <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+          </div>
         ) : (
-          <div className="w-full h-48 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
+          <div className="flex items-center justify-center h-48 bg-gradient-to-br from-gray-100 to-gray-200">
             <Package className="h-16 w-16 text-gray-400" />
           </div>
         )}
         
-        {/* Overlay gradient */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-        
-        {/* Favorite button */}
-        <button 
-          className={`absolute top-3 right-3 p-2 rounded-full backdrop-blur-sm transition-all duration-200 ${
-            isFavorited ? 'bg-red-500 text-white' : 'bg-white/80 text-gray-600 hover:bg-white'
-          } ${isHovered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'}`}
-          onClick={() => setIsFavorited(!isFavorited)}
-        >
-          <Heart className={`h-4 w-4 ${isFavorited ? 'fill-current' : ''}`} />
-        </button>
+        {/* Stock Status Badge */}
+        <div className={`absolute top-3 left-3 px-3 py-1 rounded-full text-xs font-medium ${stockStatus.color} ${stockStatus.bg} backdrop-blur-sm`}>
+          {stockStatus.text}
+        </div>
 
-        {/* Prescription badge */}
+        {/* Prescription Badge */}
         {product.prescription_required && (
-          <div className="absolute top-3 left-3 bg-blue-500 text-white px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1">
+          <div className="absolute top-3 right-3 bg-red-500 text-white px-2 py-1 rounded-full text-xs font-medium flex items-center gap-1">
             <Shield className="h-3 w-3" />
-            Prescription Required
+            Rx
           </div>
         )}
 
-        {/* Stock status badge */}
-        <div className={`absolute bottom-3 left-3 px-3 py-1 rounded-full text-xs font-medium ${stockStatus.bgColor} ${stockStatus.color}`}>
-          {stockStatus.text}
-        </div>
+        {/* Category Badge */}
+        {product.category && (
+          <div className="absolute bottom-3 left-3 bg-white/90 backdrop-blur-sm px-3 py-1 rounded-full text-xs font-medium text-gray-700">
+            {product.category}
+          </div>
+        )}
       </div>
 
-      {/* Product Details */}
-      <div className="p-6">
-        {/* Header with name and price */}
-        <div className="flex justify-between items-start mb-3">
-          <h3 className="font-bold text-lg text-gray-900 line-clamp-2 group-hover:text-blue-600 transition-colors duration-200">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex justify-between items-start gap-3">
+          <span className="text-lg font-bold text-gray-800 line-clamp-2 leading-tight">
             {product.name}
-          </h3>
-          <div className="text-right ml-4 flex-shrink-0">
-            <p className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+          </span>
+          <div className="flex flex-col items-end">
+            <span className="text-2xl font-bold text-transparent bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text">
               ${product.price.toFixed(2)}
-            </p>
-          </div>
-        </div>
-
-        {/* Description */}
-        <p className="text-gray-600 text-sm line-clamp-2 mb-4">
-          {product.description || "No description available"}
-        </p>
-
-        {/* Product Details Grid */}
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <div className="bg-gray-50 rounded-lg p-3">
-            <p className="text-xs text-gray-500 uppercase font-medium">Category</p>
-            <p className="text-sm font-medium text-gray-900">{product.category || "N/A"}</p>
-          </div>
-          <div className="bg-gray-50 rounded-lg p-3">
-            <p className="text-xs text-gray-500 uppercase font-medium">Stock</p>
-            <p className="text-sm font-medium text-gray-900">{product.stock_quantity}</p>
-          </div>
-        </div>
-
-        {/* Rating (mock) */}
-        <div className="flex items-center gap-2 mb-4">
-          <div className="flex items-center">
-            {[...Array(5)].map((_, i) => (
-              <Star key={i} className={`h-4 w-4 ${i < 4 ? 'text-yellow-400 fill-current' : 'text-gray-300'}`} />
-            ))}
-          </div>
-          <span className="text-sm text-gray-600">(4.0) • 127 reviews</span>
-        </div>
-      </div>
-
-      {/* Actions */}
-      <div className="px-6 pb-6">
-        <div className="flex gap-3">
-          <button 
-            onClick={handleAddToCart}
-            disabled={isAddingToCart || product.stock_quantity === 0}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium transition-all duration-200 ${
-              product.stock_quantity === 0 
-                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white shadow-lg hover:shadow-xl transform hover:scale-105'
-            }`}
-          >
-            {isAddingToCart ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                Adding...
-              </>
-            ) : (
-              <>
-                <ShoppingCart className="h-4 w-4" />
-                {product.prescription_required ? "Buy with Prescription" : "Add to Cart"}
-              </>
-            )}
-          </button>
-
-          {/* Admin Controls */}
-          {isAdmin && (
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowEditForm(true)}
-                className="p-3 rounded-xl border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200 group"
-              >
-                <Edit className="h-4 w-4 text-gray-600 group-hover:text-blue-600" />
-              </button>
-              <button
-                onClick={handleDelete}
-                className="p-3 rounded-xl border border-gray-200 hover:border-red-300 hover:bg-red-50 transition-all duration-200 group"
-              >
-                <Trash2 className="h-4 w-4 text-gray-600 group-hover:text-red-600" />
-              </button>
+            </span>
+            <div className="flex items-center gap-1 mt-1">
+              <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+              <span className="text-sm text-gray-500">4.5</span>
             </div>
-          )}
-        </div>
-      </div>
+          </div>
+        </CardTitle>
+      </CardHeader>
 
-      {/* Loading overlay */}
-      {isAddingToCart && (
-        <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center z-10">
-          <div className="bg-white rounded-full p-4 shadow-lg">
-            <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+      <CardContent className="space-y-4">
+        {product.description && (
+          <p className="text-sm text-gray-600 line-clamp-3 leading-relaxed">
+            {product.description}
+          </p>
+        )}
+        
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm">
+              <Package className="h-4 w-4 text-gray-500" />
+              <span className="font-medium text-gray-700">Stock:</span>
+              <span className={`font-bold ${stockStatus.color}`}>
+                {product.stock_quantity}
+              </span>
+            </div>
+          </div>
+          
+          <div className="space-y-2">
+            {product.prescription_required && (
+              <div className="flex items-center gap-2 text-sm">
+                <Shield className="h-4 w-4 text-red-500" />
+                <span className="text-red-600 font-medium">Prescription Required</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </CardContent>
+
+      <CardFooter className="flex justify-between items-center pt-4 border-t border-gray-100">
+        <Button
+          onClick={handleAddToCart}
+          disabled={isAddingToCart || product.stock_quantity === 0}
+          className={`flex items-center gap-2 px-6 py-2 rounded-lg font-medium transition-all duration-200 ${
+            product.prescription_required 
+              ? 'bg-gradient-to-r from-red-500 to-pink-500 hover:from-red-600 hover:to-pink-600 text-white shadow-lg hover:shadow-xl transform hover:scale-105'
+              : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white shadow-lg hover:shadow-xl transform hover:scale-105'
+          } disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none`}
+        >
+          {isAddingToCart ? (
+            <>
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              Adding...
+            </>
+          ) : (
+            <>
+              <ShoppingCart className="h-4 w-4" />
+              {product.prescription_required ? "Buy with Rx" : "Add to Cart"}
+            </>
+          )}
+        </Button>
+
+        {isAdmin && (
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setShowEditForm(true)}
+              className="hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all duration-200 transform hover:scale-105"
+            >
+              <Edit className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={handleDelete}
+              className="hover:bg-red-50 hover:text-red-600 hover:border-red-300 transition-all duration-200 transform hover:scale-105"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
+      </CardFooter>
+
+      {/* Out of Stock Overlay */}
+      {product.stock_quantity === 0 && (
+        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center">
+          <div className="bg-white rounded-lg p-4 text-center shadow-xl">
+            <AlertCircle className="h-8 w-8 text-red-500 mx-auto mb-2" />
+            <p className="text-lg font-bold text-gray-800">Out of Stock</p>
+            <p className="text-sm text-gray-600">This item is currently unavailable</p>
           </div>
         </div>
       )}
 
-      {/* Hover effect border */}
-      <div className={`absolute bottom-0 left-0 h-1 bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-300 ${
-        isHovered ? 'w-full' : 'w-0'
-      }`}></div>
-    </div>
+      {showEditForm && (
+        <ProductForm
+          product={product}
+          onClose={() => setShowEditForm(false)}
+        />
+      )}
+    </Card>
   );
 };
 

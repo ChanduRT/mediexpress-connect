@@ -1,11 +1,26 @@
 import { useState, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Upload, Loader2, AlertCircle, Search, ShoppingCart } from "lucide-react";
+import {
+  Upload,
+  Loader2,
+  AlertCircle,
+  Search,
+  ShoppingCart,
+} from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import { supabase } from "@/integrations/supabase/client";
 import { createWorker } from "tesseract.js";
 
@@ -19,6 +34,7 @@ const Prescription = () => {
   } | null>(null);
   const [matchingProducts, setMatchingProducts] = useState<any[]>([]);
   const [extractedText, setExtractedText] = useState<string>("");
+  const [addingToCart, setAddingToCart] = useState<string | null>(null); // Track which product is being added
 
   const { toast } = useToast();
   const location = useLocation();
@@ -120,7 +136,13 @@ const Prescription = () => {
       const text = await performOCR(file);
       setExtractedText(text);
 
-      const { isValid, foundKeywords } = validatePrescription(text);
+      const { isValid: keywordValid, foundKeywords } =
+        validatePrescription(text);
+
+      const matches = await findMatchingProducts(text);
+      setMatchingProducts(matches);
+
+      const isValid = keywordValid || matches.length > 0;
 
       const fileExt = file.name.split(".").pop();
       const fileName = `${user.id}/${Date.now()}.${fileExt}`;
@@ -139,9 +161,6 @@ const Prescription = () => {
       });
 
       if (dbError) throw dbError;
-
-      const matches = await findMatchingProducts(text);
-      setMatchingProducts(matches);
 
       if (isValid) {
         if (productId) {
@@ -203,6 +222,9 @@ const Prescription = () => {
   };
 
   const addToCart = async (product: any) => {
+    // Set loading state for this specific product
+    setAddingToCart(product.id);
+    
     try {
       const {
         data: { user },
@@ -217,32 +239,74 @@ const Prescription = () => {
         return;
       }
 
-      const { error } = await supabase.from("cart_items").insert({
-        user_id: user.id,
-        product_id: product.id,
-        quantity: 1,
-      });
+      // Check if item already exists in cart
+      const { data: existingItem, error: checkError } = await supabase
+        .from("cart_items")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("product_id", product.id)
+        .single();
 
-      if (error) {
-        toast({
-          variant: "destructive",
-          title: "Error",
-          description: "Failed to add product to cart",
-        });
-        return;
+      if (checkError && checkError.code !== "PGRST116") {
+        // PGRST116 is "not found" error, which is expected if item doesn't exist
+        throw checkError;
       }
 
-      toast({
-        title: "Success",
-        description: `${product.name} added to cart`,
-      });
+      if (existingItem) {
+        // Update quantity if item exists
+        const { error: updateError } = await supabase
+          .from("cart_items")
+          .update({ quantity: existingItem.quantity + 1 })
+          .eq("id", existingItem.id);
+
+        if (updateError) {
+          throw updateError;
+        }
+
+        toast({
+          title: "Success",
+          description: `${product.name} quantity updated in cart`,
+        });
+      } else {
+        // Insert new item if it doesn't exist
+        const { error: insertError } = await supabase
+          .from("cart_items")
+          .insert({
+            user_id: user.id,
+            product_id: product.id,
+            quantity: 1,
+          });
+
+        if (insertError) {
+          throw insertError;
+        }
+
+        toast({
+          title: "Success",
+          description: `${product.name} added to cart`,
+        });
+      }
     } catch (error) {
       console.error("Failed to add to cart:", error);
+      
+      // Provide more specific error messages
+      let errorMessage = "An unexpected error occurred";
+      
+      if (error.code === "23505") {
+        errorMessage = "This item is already in your cart";
+      } else if (error.code === "23503") {
+        errorMessage = "Product not found";
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
       toast({
         variant: "destructive",
         title: "Error",
-        description: "An unexpected error occurred",
+        description: errorMessage,
       });
+    } finally {
+      setAddingToCart(null);
     }
   };
 
@@ -260,7 +324,9 @@ const Prescription = () => {
             <div className="mb-4 p-4 bg-muted/20 border rounded-lg space-y-1">
               <h3 className="font-semibold text-gray-800">Selected Product</h3>
               <p className="text-gray-600">{productName}</p>
-              <p className="text-primary font-semibold">${price?.toFixed(2)}</p>
+              <p className="text-primary font-semibold">
+                ${price?.toFixed(2)}
+              </p>
             </div>
           )}
 
@@ -278,7 +344,9 @@ const Prescription = () => {
                   ? "Verification Successful"
                   : "Verification Failed"}
               </AlertTitle>
-              <AlertDescription>{verificationResult.message}</AlertDescription>
+              <AlertDescription>
+                {verificationResult.message}
+              </AlertDescription>
             </Alert>
           )}
 
@@ -359,8 +427,17 @@ const Prescription = () => {
                       >
                         <Search className="h-4 w-4 mr-1" /> View
                       </Button>
-                      <Button size="sm" onClick={() => addToCart(product)}>
-                        <ShoppingCart className="h-4 w-4 mr-1" /> Add
+                      <Button 
+                        size="sm" 
+                        onClick={() => addToCart(product)}
+                        disabled={addingToCart === product.id}
+                      >
+                        {addingToCart === product.id ? (
+                          <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                        ) : (
+                          <ShoppingCart className="h-4 w-4 mr-1" />
+                        )}
+                        {addingToCart === product.id ? "Adding..." : "Add"}
                       </Button>
                     </div>
                   </div>
